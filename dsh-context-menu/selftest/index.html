@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-context-menu selftest</title>
+<!-- 页面自带测试驱动：加载一个正在运行的 DSH 实例上的真实 bundle（把下面 script 的端口换成你的实例端口），模拟选中/右键/点击，结果写入 #result -->
+<style>body{font:14px/1.6 sans-serif;margin:24px}.msg{padding:12px;border:1px solid #ccc;width:420px}#result{white-space:pre-wrap;font-family:monospace;margin-top:16px}</style>
+</head>
+<body>
+  <div class="msg" id="msg">The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过懒惰的狗。</div>
+  <textarea id="box">textarea content 123</textarea>
+  <pre id="result">PENDING</pre>
+
+<script>
+// ---- ModuleLoader 垫片：捕获插件注册 ----
+window.__ModuleLoader__ = { mode: 'shim', pendingQueue: [], load(reg){ window.__cmReg = reg } }
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)) }
+
+function fireContextMenu(el){
+  const r = el.getBoundingClientRect()
+  el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 30, clientY: r.top + 8, button: 2 }))
+}
+
+function selectTextIn(el, start, end){
+  const node = el.firstChild
+  const range = document.createRange()
+  range.setStart(node, start); range.setEnd(node, end)
+  const sel = window.getSelection()
+  sel.removeAllRanges(); sel.addRange(range)
+  return sel.toString()
+}
+
+async function run(){
+  const out = []
+  const ok = (name, cond) => out.push((cond ? 'PASS ' : 'FAIL ') + name)
+
+  // 应用插件（真实 boot 路径：factory -> exports.apply）
+  const exports = window.__cmReg.factory(() => { throw new Error('no externals') })
+  exports.apply()
+  await sleep(50)
+
+  const msg = document.getElementById('msg')
+  const box = document.getElementById('box')
+  const menu = () => document.querySelector('.dshcm-menu')
+
+  // A. 非编辑区：无选区右键 → 不弹菜单
+  fireContextMenu(msg)
+  await sleep(50)
+  ok('A 无选区不弹菜单', menu() === null)
+
+  // B. 非编辑区：有选区右键 → 弹精简菜单，仅"复制"一项
+  const expected = selectTextIn(msg, 4, 19)
+  fireContextMenu(msg)
+  await sleep(50)
+  const m1 = menu()
+  ok('B1 有选区弹出菜单', m1 !== null)
+  const items = m1 ? Array.from(m1.querySelectorAll('.dshcm-item')) : []
+  ok('B2 仅一项且为复制', items.length === 1 && items[0].textContent.includes('复制'))
+  ok('B3 复制项可用', m1 !== null && m1.querySelector('.dshcm-item[data-disabled="true"]') === null)
+
+  // C. 点击"复制" → 剪贴板收到选中文本，菜单关闭
+  let captured = null
+  navigator.clipboard.writeText = async (t) => { captured = t }
+  if (m1) items[0].click()
+  await sleep(80)
+  ok('C1 复制内容正确', captured === expected)
+  ok('C2 复制后菜单关闭', menu() === null)
+
+  // D. 选区保留验证：菜单出现期间选区未被清空（execCommand 兜底的前提）
+  selectTextIn(msg, 0, 9)
+  fireContextMenu(msg)
+  await sleep(50)
+  ok('D 菜单期间选区保留', window.getSelection().toString().length === 9 && menu() !== null)
+  document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  await sleep(30)
+
+  // E. 回归：textarea 右键 → 完整菜单（粘贴/剪切/复制/全选/撤销/重做）
+  box.focus(); box.setSelectionRange(0, 0)
+  fireContextMenu(box)
+  await sleep(50)
+  const m2 = menu()
+  const labels = m2 ? Array.from(m2.querySelectorAll('.dshcm-item')).map(x => x.textContent) : []
+  ok('E1 输入框完整菜单', m2 !== null && labels.length === 6)
+  ok('E2 无选区时复制禁用', labels.length === 6 && m2.querySelectorAll('.dshcm-item[data-disabled="true"]').length === 3)
+
+  document.getElementById('result').textContent = out.join('\n')
+}
+window.addEventListener('load', () => { run().catch(e => { document.getElementById('result').textContent = 'ERROR ' + (e && e.stack || e) }) })
+</script>
+<script src="http://127.0.0.1:3080/plugins/dsh-context-menu/client.js"></script>
+</body>
+</html>

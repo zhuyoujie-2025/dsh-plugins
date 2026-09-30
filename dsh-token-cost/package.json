@@ -1,0 +1,58 @@
+{
+  "name": "dsh-token-cost",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness 费用预估插件：在对话输入区上方实时显示本次对话的 token 消耗预估费用（人民币），内置 DeepSeek 峰谷定价。",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "author": "dsh-token-cost contributors",
+  "scripts": {
+    "build": "tsdown"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "token",
+    "cost",
+    "usage",
+    "pricing"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.14"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "url": "git+https://github.com/zhuyoujie-2025/dsh-plugins.git",
+    "directory": "dsh-token-cost"
+  }
+}

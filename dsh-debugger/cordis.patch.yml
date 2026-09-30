@@ -1,0 +1,5 @@
+# Insert dsh-debugger: 4 个沙箱调试工具（扫描会话错误、全链路健康检查、
+# 会话事件检视、失败轮次上下文提取），支持 zstd 多帧会话日志解压。
+- insert:
+    - id: dsh-debugger
+      name: '@dsh-external/dsh-debugger'

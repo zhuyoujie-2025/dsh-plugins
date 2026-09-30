@@ -1,0 +1,3 @@
+- insert:
+    - id: llm-webfree-prime
+      name: '@local/dsh-llm-webfree'

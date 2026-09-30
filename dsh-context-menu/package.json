@@ -1,0 +1,51 @@
+{
+  "name": "dsh-context-menu",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness 文本框右键菜单：在输入框（textarea/input/可编辑区域）上右键显示粘贴/复制/剪切/全选/撤销/重做，浏览器与 Electron 桌面版均生效。",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "context-menu",
+    "textarea",
+    "clipboard"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.14"
+  },
+  "dsh": {
+    "client": {
+      "inject": [],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "url": "git+https://github.com/zhuyoujie-2025/dsh-plugins.git",
+    "directory": "dsh-context-menu"
+  }
+}

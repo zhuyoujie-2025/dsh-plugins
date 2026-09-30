@@ -1,0 +1,8 @@
+# dsh-vision bundle patch: registers the view_image tool for text-only models.
+# 凭据只从 VISION_API_KEY（或兼容环境变量）读取，禁止写进 profile 补丁。
+- insert:
+    - id: dsh-vision
+      name: '@dsh-external/dsh-vision'
+      config:
+        model: 'glm-4.6v-flash'
+        requireApproval: true

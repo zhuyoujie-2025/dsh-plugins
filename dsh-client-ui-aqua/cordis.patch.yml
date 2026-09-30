@@ -1,0 +1,7 @@
+# dsh-client-ui-aqua profile bundle patch（由 dsh.bundle.patch 清单字段声明）。
+# 一个 host 行；浏览器半通过 package.json 的 dsh.client 声明自动发现
+# （served at /plugins/dsh-client-ui-aqua/client.js）。
+
+- insert:
+    - id: client-ui-aqua
+      name: 'dsh-client-ui-aqua'

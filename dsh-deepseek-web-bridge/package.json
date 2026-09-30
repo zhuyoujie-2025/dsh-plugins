@@ -1,0 +1,21 @@
+{
+  "name": "@local/dsh-deepseek-web-bridge",
+  "description": "DSH host plugin: register /v1/models and /v1/chat/completions routes that reverse-proxy to a local ds-free-api (NIyueeE). Exposes chat.deepseek.com to any OpenAI-compatible client WITHOUT touching the cordis-plugin-include bundle loader chain.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "*"
+  },
+  "license": "MIT"
+}

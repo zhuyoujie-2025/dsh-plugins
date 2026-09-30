@@ -1,0 +1,21 @@
+# dependencies (profiles symlink + per-plugin installs)
+node_modules/
+
+# local backup snapshots — history belongs to git, not the tree
+*.bak
+*.bak.*
+*.bak-*
+*~
+
+# runtime logs & credentials
+*.log
+cookies.json
+
+# build/publish artifacts and test leftovers
+*.tgz
+.test-nonwritable/
+
+.DS_Store
+Thumbs.db
+# local ops manual — internal per-machine content, not for release
+dsh-ops-guide/

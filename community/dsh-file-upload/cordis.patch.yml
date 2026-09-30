@@ -1,0 +1,27 @@
+# dsh-file-upload bundle patch: one insert registering the dual-face plugin.
+# The row id must match the node half's exported cordis `name`.
+# 2026-09-28 修复: id 原值 file-upload 与 dsh-web-app 核心条目 @deepseek-ai/dsh-client-file-upload 撞车
+# (后层覆盖前层导致 fileUploads 服务缺失, session-controller/ui-deliverables 永久 pending)。
+# 改为与导出 name 一致的 dsh-file-upload。
+- insert:
+    - id: dsh-file-upload
+      name: 'dsh-file-upload'
+      config:
+        uploadMaxBytes: 26214400
+        allowedExtensions: []
+        uploadTtlMs: 604800000
+        sweepIntervalMs: 3600000
+        maxConcurrentUploads: 4
+        maxFileBytes: 26214400
+        readLimit: 2000
+        sheetRowLimit: 200
+        maxSheets: 5
+        cacheEntries: 16
+        cacheMaxBytes: 67108864
+        inlineTextLimit: 8192
+        previewTextLimit: 2048
+        markitdownBin: ''
+        visionEndpoint: ''
+        visionModel: ''
+        visionApiKeyEnv: OPENAI_API_KEY
+        visionMaxBytes: 10485760

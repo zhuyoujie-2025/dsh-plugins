@@ -1,0 +1,7 @@
+# dsh-welcome-typewriter profile bundle patch（由 dsh.bundle.patch 清单字段声明）。
+# 一个 host 行；浏览器半通过 package.json 的 dsh.client 声明自动发现
+# （served at /plugins/dsh-welcome-typewriter/client.js）。
+
+- insert:
+    - id: welcome-typewriter
+      name: 'dsh-welcome-typewriter'

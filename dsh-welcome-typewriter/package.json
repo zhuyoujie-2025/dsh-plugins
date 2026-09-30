@@ -1,0 +1,47 @@
+{
+  "name": "dsh-welcome-typewriter",
+  "version": "1.0.0",
+  "description": "DSH 首页打字机欢迎语插件：替换「探索未至之境」为逐字打出的随机问候语，80% 常规 / 15% 金色稀有 / 5% 彩虹传说，带闪烁光标。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "INSTALL.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "welcome",
+    "typewriter",
+    "client-ui"
+  ],
+  "repository": {
+    "url": "git+https://github.com/zhuyoujie-2025/dsh-plugins.git",
+    "directory": "dsh-welcome-typewriter"
+  }
+}

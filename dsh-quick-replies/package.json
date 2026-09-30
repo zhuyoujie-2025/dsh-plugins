@@ -1,0 +1,56 @@
+{
+  "name": "dsh-quick-replies",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness 快捷语插件：在对话输入框上方显示一排可点击的快捷语 chip（继续 / 都按你说的做 / 这不对，请你重新思考 + 可展开的「更多」），点击即把该短语发送到当前会话；设置里新增「快捷语」页管理两组短语，新添加的默认收进「更多」面板。",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "test": "node --test tests/store.test.mjs"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "quick-replies",
+    "composer"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.14"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "url": "git+https://github.com/zhuyoujie-2025/dsh-plugins.git",
+    "directory": "dsh-quick-replies"
+  }
+}

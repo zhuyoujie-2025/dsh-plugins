@@ -1,0 +1,12 @@
+//#region src/index.js
+/**
+* dsh-token-cost — host half.
+*
+* 浏览器半拥有全部 UI（对话输入区上方的费用预估行），token 用量直接来自
+* session projection `tokenUsage`（框架 token-meter 提供），费用为纯客户端
+* 计算。这里无需注册任何命令/服务/会话钩子，但 bundle 清单要求
+* lib/index.js 存在，故此文件是一个最小 apply() 桩。
+*/
+function apply() {}
+//#endregion
+export { apply };

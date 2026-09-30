@@ -1,0 +1,425 @@
+// dsh-permissions —— Claude 风格权限规则引擎（生产版，host 组合行）
+// 持久化：设置命名空间 `dsh-permissions`（扁平 schema，客户端经 settingsScope 编辑，落盘跨重启）。
+// 规则语义与动态原型 dperm-1/pkg-9 完全一致：
+//   优先级 hard > deny > ask > allow；hard 高于 full access（never 策略）不被豁免；
+//   ask 跟随会话审批策略（never 时放行）；路径工具支持片段/前缀/后缀/包含/多星通配。
+import z from '@deepseek-ai/schemastery'
+import fs from 'node:fs'
+import path from 'node:path'
+
+export const name = 'permissions-engine'
+export const inject = []
+
+const ACTIONS = ['hard', 'deny', 'ask', 'allow']
+const FILE_TOOLS = ['read', 'write', 'edit', 'glob', 'grep', 'read_image']
+const EMPTY = { hard: [], deny: [], ask: [], allow: [] }
+
+const DEFAULT_HARD = [
+  'write(.ssh)', 'edit(.ssh)', 'write(.aws)', 'edit(.aws)',
+  'write(.gnupg)', 'edit(.gnupg)', 'write(appdata)', 'edit(appdata)',
+  'write(*.pem)', 'edit(*.pem)', 'write(*.key)', 'edit(*.key)',
+  'write(*.env)', 'edit(*.env)', 'write(*.htpasswd)', 'edit(*.htpasswd)',
+]
+const DEFAULT_DENY = ['pwsh(rm -rf *)']
+const DEFAULT_ASK = ['pwsh', 'edit', 'write']
+const DEFAULT_ALLOW = ['read', 'glob', 'grep', 'web_search']
+
+const RuleSet = z.object({
+  hard: z.array(z.string()).description('永不允许（高于 full access，不可豁免）').default([]),
+  deny: z.array(z.string()).description('不允许').default([]),
+  ask: z.array(z.string()).description('每次询问').default([]),
+  allow: z.array(z.string()).description('始终允许').default([]),
+})
+const Schema = z.object({
+  enabled: z.boolean().description('启用权限规则引擎').default(true),
+  hard: z.array(z.string()).description('永不允许（高于 full access，不可豁免）').default(DEFAULT_HARD),
+  deny: z.array(z.string()).description('不允许').default(DEFAULT_DENY),
+  ask: z.array(z.string()).description('每次询问（全访问 never 策略下自动放行）').default(DEFAULT_ASK),
+  allow: z.array(z.string()).description('始终允许').default(DEFAULT_ALLOW),
+  workspaces: z.dict(z.string(), RuleSet)
+    .description('按 workspace 的规则（键为 workspace id，与全局规则合并判定）')
+    .default({}),
+})
+export const Config = Schema
+
+// ---------- 规则编译/合并（前缀语义 + 通配符） ----------
+function compileRule(raw) {
+  const text = String(raw).trim()
+  const m = /^([A-Za-z0-9_-]+)(?:\((.+)\))?$/.exec(text)
+  if (!m) return { ok: false }
+  const tool = m[1]
+  const inner = m[2]
+  let match
+  if (inner !== undefined) {
+    if (inner === '') return { ok: false }
+    match = { value: inner }
+  }
+  return { ok: true, tool, match }
+}
+function mergeRules(scopes) {
+  const out = []
+  for (const action of ACTIONS) {
+    for (const sc of scopes) {
+      const rows = sc.set[action] || []
+      for (let i = 0; i < rows.length; i++) {
+        const c = compileRule(rows[i])
+        if (c.ok) out.push({ action, tool: c.tool, match: c.match, source: sc.source, raw: String(rows[i]).trim(), index: i })
+      }
+    }
+  }
+  return out
+}
+
+// ---------- 参数提取（按工具语义字段，不依赖模型发参顺序） ----------
+function primaryArgOf(tool, args) {
+  if (args === undefined || args === null) return ''
+  if (typeof args === 'string') return args
+  if (Array.isArray(args)) return primaryArgOf(tool, args[0])
+  if (typeof args !== 'object') return String(args)
+  if (tool === 'pwsh') { const c = args.command; return typeof c === 'string' ? c : '' }
+  if (tool === 'grep' || tool === 'glob') { const p = args.pattern; return typeof p === 'string' ? p : '' }
+  if (FILE_TOOLS.includes(tool)) {
+    const p = args.file_path !== undefined ? args.file_path : args.path
+    if (typeof p === 'string') return p
+  }
+  for (const k of Object.keys(args)) {
+    const v = args[k]
+    if (typeof v === 'string') return v
+  }
+  return ''
+}
+function pathArgOf(args) {
+  if (args === undefined || args === null || typeof args !== 'object' || Array.isArray(args)) return ''
+  const v = args.path
+  return typeof v === 'string' && v !== '' ? v : ''
+}
+
+// ---------- 路径匹配 ----------
+function normPath(p) {
+  let s = String(p).trim()
+  if (s === '') return s
+  s = s.replace(/\\/g, '/')
+  while (s.includes('//')) s = s.replace(/\/\//g, '/')
+  if (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1)
+  return s.toLowerCase()
+}
+function looksAbsolute(p) {
+  return /^[a-z]:/i.test(p) || p.startsWith('/') || p.startsWith('~/')
+}
+function segMatch(c, p) {
+  return c === p || c.startsWith(p + '/') || c.includes('/' + p + '/') || c.endsWith('/' + p)
+}
+// *x = 结尾；x* = 片段开头；*x* = 包含；多星按序分段；绝对路径按完整前缀（支持尾星）
+function matchPathPattern(c, raw) {
+  const t = raw.trim()
+  if (t === '') return false
+  if (t === '*') return true
+  if (looksAbsolute(t)) return c.startsWith(normPath(t.replace(/\*$/, '')))
+  if (t.includes('*')) {
+    const parts = t.split('*')
+    const nonEmpty = parts.filter((p) => p !== '')
+    if (nonEmpty.length === 1 && t.endsWith('*') && !t.startsWith('*')) {
+      return segMatch(c, normPath(t.slice(0, -1)))
+    }
+    let idx = 0
+    let lastSeg = ''
+    for (let i = 0; i < parts.length; i++) {
+      const seg = normPath(parts[i])
+      if (seg === '') continue
+      if (i === 0) {
+        if (!c.startsWith(seg)) return false
+        idx = seg.length
+      } else {
+        const found = c.indexOf(seg, idx)
+        if (found < 0) return false
+        idx = found + seg.length
+      }
+      lastSeg = seg
+    }
+    if (lastSeg !== '' && !t.endsWith('*')) return c.endsWith(lastSeg)
+    return true
+  }
+  return segMatch(c, normPath(t))
+}
+function candidateArgs(tool, args) {
+  const first = primaryArgOf(tool, args)
+  if (tool === 'grep') {
+    const p = pathArgOf(args)
+    if (p !== '' && p !== first) return [first, p]
+  }
+  return [first]
+}
+function matchRule(rule, tool, args) {
+  if (rule.tool !== tool) return false
+  if (rule.match === undefined) return true
+  const isPathTool = FILE_TOOLS.includes(tool)
+  const cands = candidateArgs(tool, args)
+  for (const cand of cands) {
+    if (isPathTool) {
+      if (matchPathPattern(normPath(cand), rule.match.value)) return true
+    } else {
+      // 命令/查询类匹配不区分大小写（Windows 命令行大小写不敏感，
+      // 区分大小写的 deny 可被 remove-item -recurse 之类的大小写变体绕过）
+      const v = rule.match.value.endsWith('*') ? rule.match.value.slice(0, -1) : rule.match.value
+      if (v === '' || cand.toLowerCase().startsWith(v.toLowerCase())) return true
+    }
+  }
+  return false
+}
+function evaluate(merged, tool, args) {
+  for (const rule of merged) if (matchRule(rule, tool, args)) return rule
+  return undefined
+}
+function sourceLabel(source) {
+  return source === 'global' ? 'global' : source.slice(0, 3) === 'ws:' ? 'workspace ' + source.slice(3) : source
+}
+
+// ---------- 模型可见的规则摘要（systemPrompt 段） ----------
+function summaryText(current) {
+  if (!current || !current.enabled) return ''
+  const parts = []
+  const push = (label, list) => {
+    if (!list || list.length === 0) return
+    parts.push(label + ': ' + list.slice(0, 8).join('; ') + (list.length > 8 ? '; …' : ''))
+  }
+  push('Hard', current.hard)
+  push('Deny', current.deny)
+  push('Ask', current.ask)
+  push('Allow', current.allow)
+  const ws = current.workspaces || {}
+  for (const id of Object.keys(ws).slice(0, 3)) {
+    const w = ws[id] || EMPTY
+    push('Hard(ws:' + id + ')', w.hard)
+    push('Deny(ws:' + id + ')', w.deny)
+    push('Allow(ws:' + id + ')', w.allow)
+  }
+  if (parts.length === 0) return ''
+  return '[active-permission-rules]\n' + parts.join('\n') + '\n优先级: hard > deny > ask > allow；hard 高于 full access，被拒的调用请勿重试。'
+}
+
+export function apply(ctx, config = {}) {
+  // 0.1.7 适配：原 ctx.settings.register 命名空间已移除。
+  // 规则改为「组合层 config + 本地 JSON 文件持久化」：首次用 config 种子，
+  // 之后设置页 POST /api/dperm/rules 直接改文件并热生效。
+  let current = { hard: [], deny: [], ask: [], allow: [], workspaces: {}, ...config }
+  const rulesFile = path.join(process.env.DSH_HOME || path.join(process.env.HOME || '', '.dsh'), 'dsh-permissions.rules.json')
+  const persistRules = (value) => {
+    try { fs.writeFileSync(rulesFile, JSON.stringify(value, null, 2)) } catch (e) { console.error('[dsh-permissions] rules persist failed:', e && e.message) }
+  }
+  try {
+    if (fs.existsSync(rulesFile)) {
+      current = { ...current, ...JSON.parse(fs.readFileSync(rulesFile, 'utf8')) }
+    }
+  } catch (e) { console.error('[dsh-permissions] rules file load failed:', e && e.message) }
+  let rulesRev = 0
+  const wsCache = new Map()
+  const mergedCache = new Map()
+
+  // 服务依赖不取 apply 期快照：loader 并发启动全部 entry（Promise.allSettled），
+  // 本 fiber 的 apply 可能先于这些服务的注册完成，快照会把缺席固化为永久降级。
+  // 请求路径每次现取；路由与 systemPrompt 段改用 inject 等服务就绪再挂。
+  const getWorkspaceRegistry = () => ctx.get('workspaceRegistry')
+  const getApproval = () => ctx.get('approval')
+
+  function getMerged(keys) {
+    const key = keys.join('|')
+    const hit = mergedCache.get(key)
+    if (hit !== undefined && hit.rev === rulesRev) return hit.rules
+    const ws = (current && current.workspaces) || {}
+    const rules = mergeRules(keys.map((k) => ({
+      source: k,
+      set: k === 'global'
+        ? { hard: current.hard || [], deny: current.deny || [], ask: current.ask || [], allow: current.allow || [] }
+        : (ws[k.slice(3)] || EMPTY),
+    })))
+    mergedCache.set(key, { rev: rulesRev, rules })
+    return rules
+  }
+
+  // ---------- 作用域解析（Workspace 实体字段是 id；SessionHeader.cwd 锚定） ----------
+  async function resolveWorkspaceId(agent) {
+    if (agent === undefined || agent === null) return undefined
+    const sess = agent.session
+    const cwd = sess && sess.header ? sess.header.cwd : undefined
+    if (cwd === undefined || cwd === null || cwd === '') return undefined
+    if (wsCache.has(cwd)) return wsCache.get(cwd)
+    let id
+    try {
+      const ws = getWorkspaceRegistry() ? await getWorkspaceRegistry().resolveByPath(cwd) : undefined
+      id = ws && ws.id ? String(ws.id) : undefined
+    } catch (e) { id = undefined }
+    wsCache.set(cwd, id)
+    return id
+  }
+
+  // ---------- 会话审批策略（仅 ask 跟随；hard/deny 永不受影响） ----------
+  function effectivePolicy(agent) {
+    const approval = getApproval()
+    if (approval === undefined) return 'ask'
+    let policy
+    try {
+      const sess = agent && agent.session
+      policy = sess ? approval.overrideOf(sess) : undefined
+    } catch (e) { policy = undefined }
+    if (policy !== undefined && policy !== null) return policy
+    const cfg = approval.config
+    return cfg && cfg.policy ? cfg.policy : 'ask'
+  }
+
+  // ---------- 决策引擎（含审计环形缓冲） ----------
+  const audit = []
+  let auditSeq = 0
+  function clipText(text) {
+    const s = String(text === undefined || text === null ? '' : text)
+    return s.length > 80 ? s.slice(0, 80) : s
+  }
+  function pushAudit(entry) {
+    audit.push(Object.assign({ seq: ++auditSeq }, entry))
+    if (audit.length > 200) audit.shift()
+  }
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    let tool = '?'
+    try {
+      tool = exec.name
+      if (!current || !current.enabled) return next()
+      if (exec.agent === undefined || exec.agent === null) return next()
+      const arg = clipText(primaryArgOf(tool, exec.arguments))
+      let wsId
+      try { wsId = await resolveWorkspaceId(exec.agent) } catch (e) { wsId = undefined }
+      const keys = wsId !== undefined ? ['global', 'ws:' + wsId] : ['global']
+      const rule = evaluate(getMerged(keys), tool, exec.arguments)
+      if (rule === undefined) {
+        pushAudit({ tool, arg, decision: 'fallback', source: 'none' })
+        return next()
+      }
+      if (rule.action === 'hard') {
+        pushAudit({ tool, arg, decision: 'hard', source: rule.source, ruleRaw: rule.raw })
+        return { kind: 'deny', reason: '硬规则拒绝（高于 full access，不可豁免）[' + sourceLabel(rule.source) + ' · hard]: ' + rule.raw }
+      }
+      if (rule.action === 'deny') {
+        pushAudit({ tool, arg, decision: 'deny', source: rule.source, ruleRaw: rule.raw })
+        return { kind: 'deny', reason: '权限规则拒绝 [' + sourceLabel(rule.source) + ' · deny]: ' + rule.raw }
+      }
+      if (rule.action === 'allow') {
+        pushAudit({ tool, arg, decision: 'allow', source: rule.source, ruleRaw: rule.raw })
+        return next()
+      }
+      if (effectivePolicy(exec.agent) === 'never') {
+        pushAudit({ tool, arg, decision: 'allow', source: 'policy-never', ruleRaw: rule.raw })
+        return next()
+      }
+      pushAudit({ tool, arg, decision: 'ask', source: rule.source, ruleRaw: rule.raw })
+      return { kind: 'ask', reason: '权限规则要求确认 [' + sourceLabel(rule.source) + ' · ask]: ' + rule.raw }
+    } catch (err) {
+      pushAudit({ tool, arg: '', decision: 'engine-error', source: 'none' })
+      return next()
+    }
+  })
+
+  ctx.inject(['systemPrompt'], (sctx) => {
+    sctx.effect(() => sctx.systemPrompt.section({
+      name: 'active-permission-rules',
+      order: 108,
+      text: () => summaryText(current),
+    }))
+  })
+
+  // ---------- 设置页专用 HTTP 路由 ----------
+  // api-proxy 的 settings.describe 只暴露硬编码白名单命名空间，自定义命名空间
+  // 无法经官方 settings API 触达。引擎用自己持有的 SettingsScope 直读直写，
+  // 通过自建路由 /api/dperm/* 服务自己的设置页（同源 fetch，无 CORS）。
+  // 子路由：GET/POST /rules（读写规则）、GET /log（决策日志）、GET /match-test（试算器）。
+  ctx.inject(['webServer'], (wctx) => {
+    wctx.effect(() => wctx.webServer.register({
+      kind: 'prefix',
+      path: '/api/dperm',
+      handler: async (req, res) => {
+        const send = (code, body) => {
+          res.writeHead(code, {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-cache',
+          })
+          res.end(JSON.stringify(body))
+        }
+        try {
+          const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)
+          if (pathname === '/api/dperm/log' && req.method === 'GET') {
+            const q = new URL(req.url ?? '/', 'http://x').searchParams
+            const limit = Math.min(Number(q.get('limit')) || 60, 200)
+            send(200, { ok: true, entries: audit.slice(-limit).reverse() })
+            return
+          }
+          if (pathname === '/api/dperm/match-test' && req.method === 'GET') {
+            const q = new URL(req.url ?? '/', 'http://x').searchParams
+            const tool = String(q.get('tool') || '')
+            const arg = String(q.get('arg') || '')
+            const wsId = q.get('workspaceId')
+            const keys = wsId ? ['global', 'ws:' + wsId] : ['global']
+            const merged = getMerged(keys)
+            const rule = evaluate(merged, tool, arg)
+            send(200, {
+              ok: true,
+              outcome: rule ? rule.action : 'none',
+              rule: rule ? { action: rule.action, raw: rule.raw, source: rule.source } : null,
+              scopes: keys,
+              mergedCount: merged.length,
+            })
+            return
+          }
+          if (pathname === '/api/dperm/rules') {
+            if (req.method === 'GET') {
+              send(200, { ok: true, value: current })
+              return
+            }
+            if (req.method === 'POST') {
+              // CSRF 围栏：跨站 no-cors 写请求带 sec-fetch-site: cross-site
+              // 或异源 Origin——拒绝。LAN 网关上游剥 Origin，手机请求不受影响。
+              const sfs = String(req.headers['sec-fetch-site'] ?? '')
+              if (sfs !== '' && sfs !== 'same-origin' && sfs !== 'same-site' && sfs !== 'none') {
+                send(403, { ok: false, error: 'cross-site request rejected' })
+                return
+              }
+              const origin = req.headers['origin']
+              if (typeof origin === 'string' && origin !== '') {
+                let originHost = ''
+                try { originHost = new URL(origin).host } catch { originHost = '__invalid__' }
+                if (originHost !== String(req.headers['host'] ?? '')) {
+                  send(403, { ok: false, error: 'cross-site request rejected' })
+                  return
+                }
+              }
+              let raw = ''
+              let size = 0
+              for await (const chunk of req) {
+                size += chunk.length
+                if (size > 524288) { send(413, { ok: false, error: 'body too large (>512KB)' }); return }
+                raw += chunk
+              }
+              let section
+              try {
+                section = JSON.parse(raw)
+              } catch (e) {
+                send(400, { ok: false, error: 'invalid JSON body' })
+                return
+              }
+              if (section === null || typeof section !== 'object' || Array.isArray(section)) {
+                send(400, { ok: false, error: 'body must be a JSON object' })
+                return
+              }
+              current = Schema(section)
+              persistRules(current)
+              rulesRev += 1
+              wsCache.clear()
+              mergedCache.clear()
+              send(200, { ok: true, value: current })
+              return
+            }
+          }
+          send(404, { ok: false, error: 'not found' })
+        } catch (e) {
+          send(500, { ok: false, error: e instanceof Error ? e.message : String(e) })
+        }
+      },
+    }), 'dsh-permissions: rules route')
+  })
+}

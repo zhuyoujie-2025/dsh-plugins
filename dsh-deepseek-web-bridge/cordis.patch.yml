@@ -1,0 +1,3 @@
+- insert:
+    - id: webfree-bridge
+      name: '@local/dsh-deepseek-web-bridge'
