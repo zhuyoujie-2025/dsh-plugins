@@ -21,7 +21,8 @@ describe('package composition', () => {
 
   it('composes only package-owned rows', () => {
     const patch = readFileSync(new URL('cordis.patch.yml', root), 'utf8')
-    expect(patch).toContain("id: dsh-spotlight\n      name: '@0xsline/dsh-spotlight'")
+    // Working trees may check out CRLF on Windows; match either line ending.
+    expect(patch).toMatch(/id: dsh-spotlight\r?\n\s+name: '@0xsline\/dsh-spotlight'/)
     expect(patch).not.toContain('dsh-spotlight-invariant')
   })
 })
