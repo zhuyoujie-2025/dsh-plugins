@@ -28,6 +28,14 @@ dsh plugin add <插件目录或 git 仓库地址>
 | [dsh-quick-replies](./dsh-quick-replies) | 输入框上方快捷语 chips，一键发送常用语 | MIT |
 | [dsh-token-cost](./dsh-token-cost) | 实时显示本次对话 token 估算费用（DeepSeek 峰谷定价） | MIT |
 
+## 改造版核心包（Repacked core packages）
+
+在上游内置包基础上改造，安装方式为**覆盖同名已安装包**（详见各目录 README）：
+
+| 插件 | 说明 | License |
+|---|---|---|
+| [dsh-client-ui-model-selection](./dsh-client-ui-model-selection) | 模型选择器增强：设置页渲染完整可用模型目录，模型行/分组均可拖拽排序，顺序持久化并对 /model 与输入框菜单生效（基于上游 0.1.7-rc.2） | MIT |
+
 ## 社区收录（Community mirrors）
 
 以下插件来自 DSH 社区各作者，此处为本地镜像存档；bug 反馈与贡献请到对应 Upstream。
